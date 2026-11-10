@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ระบบเช็กเข้า-ออกโรงอาหาร</title>
+    <!-- ไลบรารีสแกนบาร์โค้ดผ่านกล้อง -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --accent: #38bdf8;
+            --text: #f8fafc;
+            --success: #22c55e;
+            --danger: #ef4444;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text); padding: 16px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { font-size: 1.6rem; color: var(--accent); }
+        .header p { font-size: 0.9rem; color: #94a3b8; }
+
+        .main-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 960px; width: 100%; }
+        @media (max-width: 768px) { .main-layout { grid-template-columns: 1fr; } }
+
+        .card { background: var(--card-bg); border: 1px solid #334155; border-radius: 20px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .card-title { font-size: 1.1rem; font-weight: 600; color: var(--accent); margin-bottom: 12px; text-align: center; }
+
+        #reader { width: 100%; border-radius: 12px; overflow: hidden; border: 2px solid var(--accent); background: #000; }
+
+        .display-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; text-align: center; }
+        .student-name { font-size: 1.4rem; font-weight: 700; color: #ffffff; margin-bottom: 8px; }
+        .points-badge { background: rgba(56, 189, 248, 0.15); border: 1px solid var(--accent); color: var(--accent); padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 1rem; margin-bottom: 15px; }
+        
+        .timer-box { font-size: 3.8rem; font-weight: 800; font-family: monospace; color: var(--success); margin: 10px 0; letter-spacing: 2px; }
+        .timer-expired { color: var(--danger) !important; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.4; } }
+
+        .status-text { font-size: 1rem; font-weight: 600; margin-top: 8px; }
+        .alert-box { padding: 12px 16px; border-radius: 12px; margin-top: 15px; width: 100%; font-size: 0.95rem; font-weight: 500; text-align: center; }
+        .alert-success { background: rgba(34, 197, 94, 0.15); border: 1px solid var(--success); color: var(--success); }
+        .alert-danger { background: rgba(239, 68, 68, 0.15); border: 1px solid var(--danger); color: var(--danger); }
+        .alert-info { background: rgba(56, 189, 248, 0.15); border: 1px solid var(--accent); color: var(--accent); }
+
+        .admin-box { grid-column: 1 / -1; margin-top: 10px; }
+        .form-row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+        .form-row input { flex: 1; min-width: 160px; padding: 12px; background: #0f172a; border: 1px solid #475569; border-radius: 10px; color: #fff; font-size: 0.95rem; }
+        .btn-submit { background: var(--accent); color: #0f172a; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+        .btn-submit:active { transform: scale(0.97); }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🏫 ระบบสแกนเข้า-ออกโรงอาหาร</h1>
+        <p>ช่วงเวลาให้บริการ 11:00 น. - 12:40 น. (จำกัดเวลา 20 นาที/คน)</p>
+    </div>
+
+    <div class="main-layout">
+        <!-- ฝั่งกล้องสแกน -->
+        <div class="card">
+            <div class="card-title">📷 สแกนบัตรนักเรียน</div>
+            <div id="reader"></div>
+        </div>
+
+        <!-- ฝั่งแสดงผล realtime -->
+        <div class="card">
+            <div class="card-title">📊 สถานะการใช้งาน</div>
+            <div class="display-panel">
+                <div class="student-name" id="dispName">กรุณาสแกนบาร์โค้ด</div>
+                <div class="points-badge" id="dispPoints">🏆 คะแนนสะสม: -- แต้ม</div>
+                
+                <div class="timer-box" id="dispTimer">20:00</div>
+                <div class="status-text" id="dispStatus">🟢 พร้อมรับการสแกน</div>
+
+                <div class="alert-box alert-info" id="msgBox" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- ฝั่งแอดมินเพิ่มนักเรียน -->
+        <div class="card admin-box">
+            <div class="card-title" style="text-align: left;">➕ แอดมิน: เพิ่มรายชื่อนักเรียนเข้าระบบ</div>
+            <form id="adminForm" onsubmit="handleAdminSubmit(event)">
+                <div class="form-row">
+                    <input type="text" id="addBarcode" placeholder="รหัสนักเรียน / บาร์โค้ด" required>
+                    <input type="text" id="addName" placeholder="ชื่อ-นามสกุล" required>
+                    <input type="text" id="addClass" placeholder="ชั้น/ห้อง (เช่น ม.4/1)" required>
+                    <button type="submit" class="btn-submit">เพิ่มนักเรียน</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+ https://script.google.com/macros/s/AKfycbyLeeQ6_HGlbJr_wfdupysb9TcrHu1KUpvnl1-HYhTr3qlzcnBvc2a-k9w1vBh_lnP_/exec
+
+        let html5QrCode = null;
+        let isProcessing = false;
+        let timerInterval = null;
+
+        window.onload = function() {
+            startCamera();
+        };
+
+        function startCamera() {
+            html5QrCode = new Html5Qrcode("reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+            
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                config, 
+                onBarcodeScanned
+            ).catch(err => {
+                showMsg("กรุณากดอนุญาตให้ใช้งานกล้องบน Safari", "danger");
+            });
+        }
+
+        function onBarcodeScanned(decodedText) {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            showMsg("⏳ กำลังตรวจสอบข้อมูล...", "info");
+
+            fetch(API_URL, {
+                method: "POST",
+                body: JSON.stringify({
+                    action: "processBarcodeScan",
+                    barcodeId: decodedText
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                handleScanResult(data);
+                setTimeout(() => { isProcessing = false; }, 3000);
+            })
+            .catch(err => {
+                showMsg("เกิดข้อผิดพลาดในการเชื่อมต่อระบบ", "danger");
+                isProcessing = false;
+            });
+        }
+
+        function handleScanResult(res) {
+            const nameEl = document.getElementById('dispName');
+            const pointsEl = document.getElementById('dispPoints');
+            const timerEl = document.getElementById('dispTimer');
+            const statusEl = document.getElementById('dispStatus');
+
+            if (!res.success) {
+                showMsg(res.message, "danger");
+                return;
+            }
+
+            nameEl.innerText = res.studentName;
+
+            if (res.action === "SCAN_IN") {
+                pointsEl.innerText = `🏆 คะแนนสะสม: ${res.currentPoints} แต้ม`;
+                statusEl.innerText = "🟢 กำลังใช้งาน (นับถอยหลัง 20 นาที)";
+                statusEl.style.color = "#22c55e";
+                showMsg(res.message, "success");
+                startTimer(res.expireTimestamp);
+
+            } else if (res.action === "SCAN_OUT") {
+                if (timerInterval) clearInterval(timerInterval);
+                timerEl.innerText = "00:00";
+                timerEl.classList.remove('timer-expired');
+                
+                pointsEl.innerText = `🏆 คะแนนสะสม: ${res.newPoints} แต้ม (${res.pointDelta > 0 ? '+' : ''}${res.pointDelta})`;
+                statusEl.innerText = `⚪ ${res.status}`;
+                statusEl.style.color = res.pointDelta > 0 ? "#22c55e" : "#ef4444";
+                
+                showMsg(res.message, res.pointDelta > 0 ? "success" : "danger");
+            }
+        }
+
+        function startTimer(expireTimestamp) {
+            if (timerInterval) clearInterval(timerInterval);
+            const timerEl = document.getElementById('dispTimer');
+            const statusEl = document.getElementById('dispStatus');
+
+            timerInterval = setInterval(() => {
+                const remaining = expireTimestamp - Date.now();
+
+                if (remaining <= 0) {
+                    clearInterval(timerInterval);
+                    timerEl.innerText = "00:00";
+                    timerEl.classList.add('timer-expired');
+                    statusEl.innerText = "🔴 หมดเวลา 20 นาทีแล้ว! กรุณาสแกนออก";
+                    statusEl.style.color = "#ef4444";
+                } else {
+                    const mins = Math.floor(remaining / 60000);
+                    const secs = Math.floor((remaining % 60000) / 1000);
+                    timerEl.innerText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                }
+            }, 1000);
+        }
+
+        function showMsg(msg, type) {
+            const box = document.getElementById('msgBox');
+            box.style.display = 'block';
+            box.className = `alert-box alert-${type}`;
+            box.innerText = msg;
+        }
+
+        function handleAdminSubmit(e) {
+            e.preventDefault();
+            const barcode = document.getElementById('addBarcode').value;
+            const name = document.getElementById('addName').value;
+            const classRoom = document.getElementById('addClass').value;
+
+            fetch(API_URL, {
+                method: "POST",
+                body: JSON.stringify({
+                    action: "addStudent",
+                    barcodeId: barcode,
+                    fullName: name,
+                    classRoom: classRoom
+                })
+            })
+            .then(res => res.json())
+            .then(res => {
+                alert(res.message);
+                if (res.success) {
+                    document.getElementById('adminForm').reset();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
